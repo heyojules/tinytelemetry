@@ -7,41 +7,16 @@ import (
 	"testing"
 )
 
-func TestBuildInputPlugins_RegistersPrimitives(t *testing.T) {
+func TestBuildInputPlugins_RegistersStdin(t *testing.T) {
 	t.Parallel()
 
-	plugins := buildInputPlugins(InputPluginConfig{
-		TCPEnabled: true,
-		TCPAddr:    "127.0.0.1:4000",
-	})
+	plugins := buildInputPlugins()
 
-	if len(plugins) != 2 {
-		t.Fatalf("expected 2 plugins, got %d", len(plugins))
+	if len(plugins) != 1 {
+		t.Fatalf("expected 1 plugin, got %d", len(plugins))
 	}
-	if plugins[0].Name() != "tcp" {
-		t.Fatalf("plugins[0] name = %q, want %q", plugins[0].Name(), "tcp")
-	}
-	if plugins[1].Name() != "stdin" {
-		t.Fatalf("plugins[1] name = %q, want %q", plugins[1].Name(), "stdin")
-	}
-	if !plugins[0].Enabled() {
-		t.Fatal("expected tcp plugin to be enabled when TCPEnabled=true")
-	}
-}
-
-func TestBuildInputPlugins_TCPDisabled(t *testing.T) {
-	t.Parallel()
-
-	plugins := buildInputPlugins(InputPluginConfig{
-		TCPEnabled: false,
-		TCPAddr:    "127.0.0.1:4000",
-	})
-
-	if len(plugins) != 2 {
-		t.Fatalf("expected 2 plugins, got %d", len(plugins))
-	}
-	if plugins[0].Enabled() {
-		t.Fatal("expected tcp plugin to be disabled when TCPEnabled=false")
+	if plugins[0].Name() != "stdin" {
+		t.Fatalf("plugins[0] name = %q, want %q", plugins[0].Name(), "stdin")
 	}
 }
 
@@ -53,43 +28,43 @@ func TestLoadConfig_AddressResolution(t *testing.T) {
 		configYAML   string
 		wantErr      bool
 		wantHost     string
-		wantTCPAddr  string
+		wantGRPCAddr string
 		wantAPIAddr  string
 		errSubstring string
 	}{
 		{
 			name: "defaults to localhost host",
 			configYAML: `
-tcp-port: 4100
+grpc-port: 4317
 api-port: 3100
 `,
-			wantHost:    "127.0.0.1",
-			wantTCPAddr: "127.0.0.1:4100",
-			wantAPIAddr: "127.0.0.1:3100",
+			wantHost:     "127.0.0.1",
+			wantGRPCAddr: "127.0.0.1:4317",
+			wantAPIAddr:  "127.0.0.1:3100",
 		},
 		{
-			name: "host applies to derived tcp and api addresses",
+			name: "host applies to derived grpc and api addresses",
 			configYAML: `
 host: 0.0.0.0
-tcp-port: 4200
+grpc-port: 4318
 api-port: 3200
 `,
-			wantHost:    "0.0.0.0",
-			wantTCPAddr: "0.0.0.0:4200",
-			wantAPIAddr: "0.0.0.0:3200",
+			wantHost:     "0.0.0.0",
+			wantGRPCAddr: "0.0.0.0:4318",
+			wantAPIAddr:  "0.0.0.0:3200",
 		},
 		{
 			name: "explicit addresses override host and ports",
 			configYAML: `
 host: 0.0.0.0
-tcp-port: 4300
+grpc-port: 4319
 api-port: 3300
-tcp-addr: 10.0.0.5:9999
+grpc-addr: 10.0.0.5:9999
 api-addr: 10.0.0.5:8888
 `,
-			wantHost:    "0.0.0.0",
-			wantTCPAddr: "10.0.0.5:9999",
-			wantAPIAddr: "10.0.0.5:8888",
+			wantHost:     "0.0.0.0",
+			wantGRPCAddr: "10.0.0.5:9999",
+			wantAPIAddr:  "10.0.0.5:8888",
 		},
 	}
 
@@ -114,8 +89,8 @@ api-addr: 10.0.0.5:8888
 			if cfg.Host != tt.wantHost {
 				t.Fatalf("Host = %q, want %q", cfg.Host, tt.wantHost)
 			}
-			if cfg.TCPAddr != tt.wantTCPAddr {
-				t.Fatalf("TCPAddr = %q, want %q", cfg.TCPAddr, tt.wantTCPAddr)
+			if cfg.GRPCAddr != tt.wantGRPCAddr {
+				t.Fatalf("GRPCAddr = %q, want %q", cfg.GRPCAddr, tt.wantGRPCAddr)
 			}
 			if cfg.APIAddr != tt.wantAPIAddr {
 				t.Fatalf("APIAddr = %q, want %q", cfg.APIAddr, tt.wantAPIAddr)
@@ -137,7 +112,7 @@ func TestLoadConfig_BackupSettings(t *testing.T) {
 		{
 			name: "backup defaults disabled",
 			configYAML: `
-tcp-port: 4000
+grpc-port: 4317
 api-port: 3000
 `,
 			assert: func(t *testing.T, cfg appConfig) {
@@ -166,7 +141,7 @@ backup-s3-region: us-east-1
 backup-s3-access-key: key
 backup-s3-secret-key: secret
 backup-s3-use-ssl: true
-tcp-port: 4000
+grpc-port: 4317
 api-port: 3000
 `,
 			assert: func(t *testing.T, cfg appConfig) {
@@ -187,7 +162,7 @@ api-port: 3000
 			configYAML: `
 backup-enabled: true
 backup-interval: 0s
-tcp-port: 4000
+grpc-port: 4317
 api-port: 3000
 `,
 			wantErr:      true,
@@ -198,7 +173,7 @@ api-port: 3000
 			configYAML: `
 backup-enabled: true
 backup-keep-last: -1
-tcp-port: 4000
+grpc-port: 4317
 api-port: 3000
 `,
 			wantErr:      true,
@@ -209,7 +184,7 @@ api-port: 3000
 			configYAML: `
 backup-enabled: true
 backup-bucket-url: s3://my-bucket/lotus
-tcp-port: 4000
+grpc-port: 4317
 api-port: 3000
 `,
 			wantErr:      true,

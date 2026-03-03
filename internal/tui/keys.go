@@ -105,11 +105,11 @@ func DefaultKeyMap() KeyMap {
 		),
 		Left: key.NewBinding(
 			key.WithKeys("left"),
-			key.WithHelp("←", "prev view"),
+			key.WithHelp("←", "navigate left"),
 		),
 		Right: key.NewBinding(
 			key.WithKeys("right"),
-			key.WithHelp("→", "next view"),
+			key.WithHelp("→", "navigate right"),
 		),
 
 		NextView: key.NewBinding(

@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -14,6 +15,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type blackboxConfig struct {
@@ -26,13 +34,13 @@ type blackboxConfig struct {
 }
 
 type blackboxServer struct {
-	cmd     *exec.Cmd
-	apiAddr string
-	tcpAddr string
-	output  *bytes.Buffer
-	exitCh  chan error
-	exited  bool
-	exitErr error
+	cmd      *exec.Cmd
+	apiAddr  string
+	grpcAddr string
+	output   *bytes.Buffer
+	exitCh   chan error
+	exited   bool
+	exitErr  error
 }
 
 var (
@@ -88,10 +96,10 @@ func TestBlackBox_JournalToggleBehavior(t *testing.T) {
 	}
 
 	srv1 := startBlackboxServer(t, enabledCfg)
-	lines := generateJSONBurst(80, "journal-on-app", "journal-on-svc")
-	sendTCPLines(t, srv1.tcpAddr, lines)
-	waitForAppCountHTTP(t, srv1.apiAddr, "journal-on-app", int64(len(lines)), 10*time.Second)
-	waitForJournalLineCount(t, enabledCfg.JournalPath, len(lines), 10*time.Second)
+	const batch1 = 80
+	sendBlackboxOTLPLogs(t, srv1.grpcAddr, batch1, "journal-on-app", "journal-on-svc")
+	waitForAppCountHTTP(t, srv1.apiAddr, "journal-on-app", batch1, 10*time.Second)
+	waitForJournalLineCount(t, enabledCfg.JournalPath, batch1, 10*time.Second)
 	if _, err := os.Stat(enabledCfg.JournalPath + ".commit"); err != nil {
 		t.Fatalf("expected commit file when journal is enabled: %v", err)
 	}
@@ -106,9 +114,9 @@ func TestBlackBox_JournalToggleBehavior(t *testing.T) {
 		InsertFlushQueue:    32,
 	}
 	srv2 := startBlackboxServer(t, disabledCfg)
-	lines = generateJSONBurst(40, "journal-off-app", "journal-off-svc")
-	sendTCPLines(t, srv2.tcpAddr, lines)
-	waitForAppCountHTTP(t, srv2.apiAddr, "journal-off-app", int64(len(lines)), 10*time.Second)
+	const batch2 = 40
+	sendBlackboxOTLPLogs(t, srv2.grpcAddr, batch2, "journal-off-app", "journal-off-svc")
+	waitForAppCountHTTP(t, srv2.apiAddr, "journal-off-app", batch2, 10*time.Second)
 	srv2.Kill(t)
 	if _, err := os.Stat(disabledCfg.JournalPath); !os.IsNotExist(err) {
 		t.Fatalf("expected no journal file when journal is disabled; err=%v", err)
@@ -120,13 +128,13 @@ func startBlackboxServer(t *testing.T, cfg blackboxConfig) *blackboxServer {
 
 	repoRoot := findRepoRoot(t)
 	apiPort := freeTCPPort(t)
-	tcpPort := freeTCPPort(t)
+	grpcPort := freeTCPPort(t)
 	socketPath := filepath.Join(filepath.Dir(cfg.DBPath), fmt.Sprintf("lotus-%d.sock", time.Now().UnixNano()))
 
 	configPath := filepath.Join(filepath.Dir(cfg.DBPath), fmt.Sprintf("config-%d.yml", time.Now().UnixNano()))
 	configBody := fmt.Sprintf(`host: 127.0.0.1
-tcp-enabled: true
-tcp-port: %d
+grpc-enabled: true
+grpc-port: %d
 api-enabled: true
 api-port: %d
 db-path: %q
@@ -138,7 +146,7 @@ insert-flush-queue-size: %d
 journal-enabled: %t
 journal-path: %q
 backup-enabled: false
-`, tcpPort, apiPort, cfg.DBPath, socketPath, cfg.InsertBatchSize, cfg.InsertFlushInterval.String(), cfg.InsertFlushQueue, cfg.JournalEnabled, cfg.JournalPath)
+`, grpcPort, apiPort, cfg.DBPath, socketPath, cfg.InsertBatchSize, cfg.InsertFlushInterval.String(), cfg.InsertFlushQueue, cfg.JournalEnabled, cfg.JournalPath)
 	if err := os.WriteFile(configPath, []byte(configBody), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -153,11 +161,11 @@ backup-enabled: false
 	}
 
 	srv := &blackboxServer{
-		cmd:     cmd,
-		apiAddr: fmt.Sprintf("127.0.0.1:%d", apiPort),
-		tcpAddr: fmt.Sprintf("127.0.0.1:%d", tcpPort),
-		output:  &out,
-		exitCh:  make(chan error, 1),
+		cmd:      cmd,
+		apiAddr:  fmt.Sprintf("127.0.0.1:%d", apiPort),
+		grpcAddr: fmt.Sprintf("127.0.0.1:%d", grpcPort),
+		output:   &out,
+		exitCh:   make(chan error, 1),
 	}
 	go func() {
 		srv.exitCh <- cmd.Wait()
@@ -359,6 +367,50 @@ func freeTCPPort(t *testing.T) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func sendBlackboxOTLPLogs(t *testing.T, addr string, n int, app, service string) {
+	t.Helper()
+	logRecords := make([]*logspb.LogRecord, 0, n)
+	for i := 0; i < n; i++ {
+		logRecords = append(logRecords, &logspb.LogRecord{
+			TimeUnixNano: 1761268800000000000,
+			SeverityText: "Info",
+			Body:         &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: fmt.Sprintf("burst-%d", i)}},
+			Attributes: []*commonpb.KeyValue{
+				{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: service}}},
+				{Key: "app", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: app}}},
+				{Key: "host.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "load-host"}}},
+			},
+		})
+	}
+	req := &collogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logspb.ResourceLogs{
+			{
+				Resource: &resourcepb.Resource{
+					Attributes: []*commonpb.KeyValue{
+						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: service}}},
+					},
+				},
+				ScopeLogs: []*logspb.ScopeLogs{
+					{LogRecords: logRecords},
+				},
+			},
+		},
+	}
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc dial %s: %v", addr, err)
+	}
+	defer conn.Close()
+
+	client := collogspb.NewLogsServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := client.Export(ctx, req); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
 }
 
 func findRepoRoot(t *testing.T) string {

@@ -1,13 +1,11 @@
 package tests
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,13 +15,18 @@ import (
 	"testing"
 	"time"
 
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/tinytelemetry/lotus/internal/duckdb"
 	"github.com/tinytelemetry/lotus/internal/httpserver"
-	"github.com/tinytelemetry/lotus/internal/ingest"
-	"github.com/tinytelemetry/lotus/internal/logsource"
 	"github.com/tinytelemetry/lotus/internal/model"
+	"github.com/tinytelemetry/lotus/internal/otlpreceiver"
 	"github.com/tinytelemetry/lotus/internal/socketrpc"
-	"github.com/tinytelemetry/lotus/internal/tcpserver"
 )
 
 type e2eConfig struct {
@@ -34,14 +37,14 @@ type e2eConfig struct {
 }
 
 type e2eStack struct {
-	store   *duckdb.Store
-	insert  *duckdb.InsertBuffer
-	api     *httpserver.Server
-	socket  *socketrpc.Server
-	source  *logsource.TCPSource
-	tcp     *tcpserver.Server
-	apiAddr string
-	sock    string
+	store    *duckdb.Store
+	insert   *duckdb.InsertBuffer
+	api      *httpserver.Server
+	socket   *socketrpc.Server
+	otlp     *otlpreceiver.Server
+	apiAddr  string
+	grpcAddr string
+	sock     string
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -87,41 +90,23 @@ func startE2EStack(t *testing.T, cfg e2eConfig) *e2eStack {
 		t.Fatalf("socket Start: %v", err)
 	}
 
-	tcp := tcpserver.NewServer("127.0.0.1:0")
-	if err := tcp.Start(); err != nil {
-		t.Fatalf("tcp Start: %v", err)
+	otlpServer := otlpreceiver.NewServer("127.0.0.1:0", insert)
+	if err := otlpServer.Start(); err != nil {
+		t.Fatalf("otlp Start: %v", err)
 	}
-	source := logsource.NewTCPSource(tcp)
 
-	processor := ingest.NewProcessor(insert, "tcp")
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	stack := &e2eStack{
-		store:   store,
-		insert:  insert,
-		api:     api,
-		socket:  socket,
-		source:  source,
-		tcp:     tcp,
-		apiAddr: api.Addr(),
-		sock:    sock,
-		cancel:  cancel,
+		store:    store,
+		insert:   insert,
+		api:      api,
+		socket:   socket,
+		otlp:     otlpServer,
+		apiAddr:  api.Addr(),
+		grpcAddr: otlpServer.Addr(),
+		sock:     sock,
+		cancel:   cancel,
 	}
-
-	stack.wg.Add(1)
-	go func() {
-		defer stack.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case env, ok := <-source.Lines():
-				if !ok {
-					return
-				}
-				processor.ProcessEnvelope(env)
-			}
-		}
-	}()
 
 	waitEventually(t, 3*time.Second, 20*time.Millisecond, func() bool {
 		url := "http://" + stack.apiAddr + "/api/health"
@@ -148,7 +133,7 @@ func startE2EStack(t *testing.T, cfg e2eConfig) *e2eStack {
 
 	t.Cleanup(func() {
 		stack.cancel()
-		stack.source.Stop()
+		stack.otlp.Stop()
 		stack.wg.Wait()
 		stack.insert.Stop()
 		stack.socket.Stop()
@@ -173,35 +158,101 @@ func waitEventually(t *testing.T, timeout, interval time.Duration, condition fun
 	}
 }
 
-func sendTCPLines(t *testing.T, addr string, lines []string) {
+func sendOTLPLogs(t *testing.T, addr string, req *collogspb.ExportLogsServiceRequest) {
 	t.Helper()
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		t.Fatalf("dial tcp %s: %v", addr, err)
+		t.Fatalf("grpc dial %s: %v", addr, err)
 	}
 	defer conn.Close()
 
-	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	w := bufio.NewWriterSize(conn, 256*1024)
-	for _, line := range lines {
-		if _, err := w.WriteString(line + "\n"); err != nil {
-			t.Fatalf("write line: %v", err)
-		}
-	}
-	if err := w.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
+	client := collogspb.NewLogsServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := client.Export(ctx, req); err != nil {
+		t.Fatalf("Export: %v", err)
 	}
 }
 
-func generateJSONBurst(n int, app, service string) []string {
-	lines := make([]string, 0, n)
-	for i := 0; i < n; i++ {
-		lines = append(lines, fmt.Sprintf(
-			`{"timeUnixNano":"1761268800000000000","severityText":"Info","body":{"stringValue":"burst-%d"},"attributes":[{"key":"service.name","value":{"stringValue":"%s"}},{"key":"app","value":{"stringValue":"%s"}},{"key":"host.name","value":{"stringValue":"load-host"}}]}`,
-			i, service, app,
-		))
+func buildOTLPLogRequest(records []otlpLogEntry) *collogspb.ExportLogsServiceRequest {
+	// Group records by service+app for resource grouping
+	logRecords := make([]*logspb.LogRecord, 0, len(records))
+	var resourceAttrs []*commonpb.KeyValue
+
+	if len(records) > 0 {
+		r := records[0]
+		resourceAttrs = []*commonpb.KeyValue{
+			{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: r.Service}}},
+			{Key: "host.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: r.Hostname}}},
+			{Key: "app", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: r.App}}},
+		}
 	}
-	return lines
+
+	for _, r := range records {
+		lr := &logspb.LogRecord{
+			TimeUnixNano: r.TimeUnixNano,
+			SeverityText: r.SeverityText,
+			Body:         &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: r.Body}},
+			Attributes: []*commonpb.KeyValue{
+				{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: r.Service}}},
+				{Key: "host.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: r.Hostname}}},
+				{Key: "app", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: r.App}}},
+			},
+		}
+		logRecords = append(logRecords, lr)
+	}
+
+	return &collogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logspb.ResourceLogs{
+			{
+				Resource: &resourcepb.Resource{Attributes: resourceAttrs},
+				ScopeLogs: []*logspb.ScopeLogs{
+					{LogRecords: logRecords},
+				},
+			},
+		},
+	}
+}
+
+type otlpLogEntry struct {
+	TimeUnixNano uint64
+	SeverityText string
+	Body         string
+	Service      string
+	Hostname     string
+	App          string
+}
+
+func generateOTLPBurst(n int, app, service string) *collogspb.ExportLogsServiceRequest {
+	logRecords := make([]*logspb.LogRecord, 0, n)
+	for i := 0; i < n; i++ {
+		lr := &logspb.LogRecord{
+			TimeUnixNano: 1761268800000000000,
+			SeverityText: "Info",
+			Body:         &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: fmt.Sprintf("burst-%d", i)}},
+			Attributes: []*commonpb.KeyValue{
+				{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: service}}},
+				{Key: "app", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: app}}},
+				{Key: "host.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "load-host"}}},
+			},
+		}
+		logRecords = append(logRecords, lr)
+	}
+
+	return &collogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logspb.ResourceLogs{
+			{
+				Resource: &resourcepb.Resource{
+					Attributes: []*commonpb.KeyValue{
+						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: service}}},
+					},
+				},
+				ScopeLogs: []*logspb.ScopeLogs{
+					{LogRecords: logRecords},
+				},
+			},
+		},
+	}
 }
 
 func waitForLogCount(t *testing.T, store *duckdb.Store, expected int64, timeout time.Duration) {
@@ -278,16 +329,23 @@ func containsDimension(items []model.DimensionCount, want string) bool {
 	return false
 }
 
-func TestE2E_Pipeline_TCPToHTTPAndSocket(t *testing.T) {
+func TestE2E_Pipeline_OTLPToHTTPAndSocket(t *testing.T) {
 	stack := startE2EStack(t, e2eConfig{})
-	lines := []string{
-		`{"timeUnixNano":"1761238800000000000","severityText":"Info","body":{"stringValue":"payment created"},"attributes":[{"key":"service.name","value":{"stringValue":"billing-api"}},{"key":"host.name","value":{"stringValue":"h1"}},{"key":"app","value":{"stringValue":"payments"}}]}`,
-		`{"timeUnixNano":"1761238801000000000","severityText":"Warn","body":{"stringValue":"retrying webhook"},"attributes":[{"key":"service.name","value":{"stringValue":"billing-api"}},{"key":"host.name","value":{"stringValue":"h1"}},{"key":"app","value":{"stringValue":"payments"}}]}`,
-		`{"timeUnixNano":"1761238802000000000","severityText":"Error","body":{"stringValue":"search timeout"},"attributes":[{"key":"service.name","value":{"stringValue":"search-api"}},{"key":"host.name","value":{"stringValue":"h2"}},{"key":"app","value":{"stringValue":"search"}}]}`,
+
+	entries := []otlpLogEntry{
+		{TimeUnixNano: 1761238800000000000, SeverityText: "Info", Body: "payment created", Service: "billing-api", Hostname: "h1", App: "payments"},
+		{TimeUnixNano: 1761238801000000000, SeverityText: "Warn", Body: "retrying webhook", Service: "billing-api", Hostname: "h1", App: "payments"},
+		{TimeUnixNano: 1761238802000000000, SeverityText: "Error", Body: "search timeout", Service: "search-api", Hostname: "h2", App: "search"},
 	}
 
-	sendTCPLines(t, stack.tcp.Addr(), lines)
-	waitForLogCount(t, stack.store, int64(len(lines)), 8*time.Second)
+	// Build separate requests per resource (service+app combo)
+	billingEntries := entries[:2]
+	searchEntries := entries[2:]
+
+	sendOTLPLogs(t, stack.grpcAddr, buildOTLPLogRequest(billingEntries))
+	sendOTLPLogs(t, stack.grpcAddr, buildOTLPLogRequest(searchEntries))
+
+	waitForLogCount(t, stack.store, int64(len(entries)), 8*time.Second)
 
 	client, err := socketrpc.Dial(stack.sock)
 	if err != nil {
@@ -299,8 +357,8 @@ func TestE2E_Pipeline_TCPToHTTPAndSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TotalLogCount: %v", err)
 	}
-	if count != int64(len(lines)) {
-		t.Fatalf("TotalLogCount=%d want=%d", count, len(lines))
+	if count != int64(len(entries)) {
+		t.Fatalf("TotalLogCount=%d want=%d", count, len(entries))
 	}
 
 	apps, err := client.ListApps()
@@ -351,8 +409,8 @@ func TestE2E_BurstIngest_NoLoss(t *testing.T) {
 	})
 
 	const total = 12000
-	lines := generateJSONBurst(total, "load", "load-svc")
-	sendTCPLines(t, stack.tcp.Addr(), lines)
+	req := generateOTLPBurst(total, "load", "load-svc")
+	sendOTLPLogs(t, stack.grpcAddr, req)
 
 	waitForLogCount(t, stack.store, total, 20*time.Second)
 
@@ -381,7 +439,7 @@ func TestE2E_ConcurrentReadsDuringIngest(t *testing.T) {
 	})
 
 	const total = 6000
-	lines := generateJSONBurst(total, "concurrency", "query-svc")
+	req := generateOTLPBurst(total, "concurrency", "query-svc")
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, 128)
@@ -427,7 +485,7 @@ func TestE2E_ConcurrentReadsDuringIngest(t *testing.T) {
 		}()
 	}
 
-	sendTCPLines(t, stack.tcp.Addr(), lines)
+	sendOTLPLogs(t, stack.grpcAddr, req)
 	waitForLogCount(t, stack.store, total, 20*time.Second)
 
 	wg.Wait()

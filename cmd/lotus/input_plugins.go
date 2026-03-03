@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/tinytelemetry/lotus/internal/logsource"
-	"github.com/tinytelemetry/lotus/internal/tcpserver"
 )
 
 // NamedLogSource aliases the shared source abstraction to keep app-layer APIs explicit.
@@ -19,37 +17,8 @@ type InputSourcePlugin interface {
 	Build(ctx context.Context) (NamedLogSource, error)
 }
 
-// InputPluginConfig defines runtime input selection.
-type InputPluginConfig struct {
-	TCPEnabled bool
-	TCPAddr    string
-}
-
-func buildInputPlugins(cfg InputPluginConfig) []InputSourcePlugin {
-	plugins := make([]InputSourcePlugin, 0, 2)
-	plugins = append(plugins, tcpInputPlugin{
-		addr:    cfg.TCPAddr,
-		enabled: cfg.TCPEnabled,
-	})
-	plugins = append(plugins, stdinInputPlugin{})
-	return plugins
-}
-
-type tcpInputPlugin struct {
-	addr    string
-	enabled bool
-}
-
-func (p tcpInputPlugin) Name() string { return "tcp" }
-
-func (p tcpInputPlugin) Enabled() bool { return p.enabled }
-
-func (p tcpInputPlugin) Build(_ context.Context) (NamedLogSource, error) {
-	server := tcpserver.NewServer(p.addr)
-	if err := server.Start(); err != nil {
-		return nil, fmt.Errorf("start tcp server: %w", err)
-	}
-	return logsource.NewTCPSource(server), nil
+func buildInputPlugins() []InputSourcePlugin {
+	return []InputSourcePlugin{stdinInputPlugin{}}
 }
 
 type stdinInputPlugin struct{}

@@ -10,7 +10,7 @@ const (
 	defaultUpdateInterval      = model.DefaultUpdateInterval
 	defaultLogBuffer           = model.DefaultLogBuffer
 	defaultBindHost            = "127.0.0.1"
-	defaultTCPPort             = 4000
+	defaultGRPCPort            = 4317
 	defaultMuxBufferSize       = DefaultMuxBuffer
 	defaultSkin                = model.DefaultSkin
 	defaultAPIPort             = 5000
@@ -33,9 +33,9 @@ type appConfig struct {
 	LogBuffer            int           `mapstructure:"log-buffer"`
 	TestMode             bool          `mapstructure:"test-mode"`
 	Host                 string        `mapstructure:"host"`
-	TCPEnabled           bool          `mapstructure:"tcp-enabled"`
-	TCPPort              int           `mapstructure:"tcp-port"`
-	TCPAddr              string        `mapstructure:"tcp-addr"`
+	GRPCEnabled          bool          `mapstructure:"grpc-enabled"`
+	GRPCPort             int           `mapstructure:"grpc-port"`
+	GRPCAddr             string        `mapstructure:"grpc-addr"`
 	MuxBufferSize        int           `mapstructure:"mux-buffer-size"`
 	DBPath               string        `mapstructure:"db-path"`
 	Skin                 string        `mapstructure:"skin"`

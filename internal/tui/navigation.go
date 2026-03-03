@@ -199,14 +199,51 @@ func (m *DashboardModel) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.moveSidebarCursor(1)
 			return m, cmd
 		case key.Matches(msg, k.Right):
-			cmd := m.nextView()
-			return m, cmd
+			if m.hasDecksSection() {
+				m.activeSection = SectionDecks
+				m.activeDeckIdx = 0
+			}
+			return m, nil
 		case key.Matches(msg, k.Left):
-			cmd := m.prevView()
-			return m, cmd
+			return m, nil
 		case key.Matches(msg, k.Enter):
 			cmd := m.activateSidebarCursor()
 			return m, cmd
+		}
+	}
+
+	// Deck left/right navigation
+	if m.activeSection == SectionDecks {
+		switch {
+		case key.Matches(msg, k.Right):
+			if m.activeDeckIdx < len(m.decks)-1 {
+				m.activeDeckIdx++
+			} else {
+				// Last deck → go to next page
+				m.nextPage()
+				m.activeSection = SectionDecks
+				m.activeDeckIdx = 0
+				if m.activeDeckIdx >= len(m.decks) {
+					m.activeDeckIdx = max(0, len(m.decks)-1)
+				}
+			}
+			return m, nil
+		case key.Matches(msg, k.Left):
+			if m.activeDeckIdx > 0 {
+				m.activeDeckIdx--
+			} else {
+				pg := m.activePage()
+				if pg != nil && len(pg.Views) > 1 {
+					// Multiple views → go to prev view, focus last deck
+					cmd := m.prevView()
+					m.activeSection = SectionDecks
+					m.activeDeckIdx = max(0, len(m.decks)-1)
+					return m, cmd
+				} else if m.sidebarVisible {
+					m.activeSection = SectionSidebar
+				}
+			}
+			return m, nil
 		}
 	}
 

@@ -18,6 +18,7 @@ import (
 	"github.com/tinytelemetry/lotus/internal/ingest"
 	"github.com/tinytelemetry/lotus/internal/journal"
 	"github.com/tinytelemetry/lotus/internal/model"
+	"github.com/tinytelemetry/lotus/internal/otlpreceiver"
 	"github.com/tinytelemetry/lotus/internal/socketrpc"
 	"golang.org/x/sync/errgroup"
 )
@@ -129,11 +130,17 @@ func runServer(cfg appConfig) error {
 		os.Exit(1)
 	}()
 
+	// Start OTLP/gRPC receiver if enabled
+	if cfg.GRPCEnabled {
+		otlpServer := otlpreceiver.NewServer(cfg.GRPCAddr, insertBuffer)
+		if err := otlpServer.Start(); err != nil {
+			return fmt.Errorf("failed to start OTLP receiver: %w", err)
+		}
+		defer otlpServer.Stop()
+	}
+
 	// Build input plugins and source multiplexer
-	plugins := buildInputPlugins(InputPluginConfig{
-		TCPEnabled: cfg.TCPEnabled,
-		TCPAddr:    cfg.TCPAddr,
-	})
+	plugins := buildInputPlugins()
 
 	sources := make([]NamedLogSource, 0, len(plugins))
 	for _, plugin := range plugins {
@@ -324,10 +331,10 @@ func printStartupBanner(cfg appConfig, _ bool, processorName string) {
 		lines = append(lines, fmt.Sprintf("    %s  HTTP API       %s", dot, dim.Render("disabled")))
 	}
 
-	if cfg.TCPEnabled {
-		lines = append(lines, fmt.Sprintf("    %s  TCP Ingest     %s", check, cyan.Render(cfg.TCPAddr)))
+	if cfg.GRPCEnabled {
+		lines = append(lines, fmt.Sprintf("    %s  OTLP/gRPC      %s", check, cyan.Render(cfg.GRPCAddr)))
 	} else {
-		lines = append(lines, fmt.Sprintf("    %s  TCP Ingest     %s", dot, dim.Render("disabled")))
+		lines = append(lines, fmt.Sprintf("    %s  OTLP/gRPC      %s", dot, dim.Render("disabled")))
 	}
 
 	lines = append(lines, fmt.Sprintf("    %s  Unix Socket    %s", check, cyan.Render(shortenPath(cfg.SocketPath))))

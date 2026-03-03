@@ -78,8 +78,8 @@ func loadConfig(configPath string) (appConfig, error) {
 	v.SetDefault("log-buffer", defaultLogBuffer)
 	v.SetDefault("test-mode", false)
 	v.SetDefault("host", defaultBindHost)
-	v.SetDefault("tcp-enabled", true)
-	v.SetDefault("tcp-port", defaultTCPPort)
+	v.SetDefault("grpc-enabled", true)
+	v.SetDefault("grpc-port", defaultGRPCPort)
 	v.SetDefault("mux-buffer-size", defaultMuxBufferSize)
 	v.SetDefault("db-path", defaultDBPath)
 	v.SetDefault("skin", defaultSkin)
@@ -127,8 +127,8 @@ func loadConfig(configPath string) (appConfig, error) {
 		return cfg, err
 	}
 	cfg.ConfigPath = v.ConfigFileUsed()
-	if cfg.TCPPort <= 0 || cfg.TCPPort > 65535 {
-		return cfg, fmt.Errorf("invalid tcp-port: %d", cfg.TCPPort)
+	if cfg.GRPCPort <= 0 || cfg.GRPCPort > 65535 {
+		return cfg, fmt.Errorf("invalid grpc-port: %d", cfg.GRPCPort)
 	}
 	if cfg.APIPort <= 0 || cfg.APIPort > 65535 {
 		return cfg, fmt.Errorf("invalid api-port: %d", cfg.APIPort)
@@ -164,8 +164,8 @@ func loadConfig(configPath string) (appConfig, error) {
 		host = defaultBindHost
 	}
 
-	if cfg.TCPAddr == "" {
-		cfg.TCPAddr = net.JoinHostPort(host, strconv.Itoa(cfg.TCPPort))
+	if cfg.GRPCAddr == "" {
+		cfg.GRPCAddr = net.JoinHostPort(host, strconv.Itoa(cfg.GRPCPort))
 	}
 	if cfg.APIAddr == "" {
 		cfg.APIAddr = net.JoinHostPort(host, strconv.Itoa(cfg.APIPort))
