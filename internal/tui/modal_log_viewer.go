@@ -137,5 +137,5 @@ func (m *DashboardModel) renderLogViewerModalView(width, height int) string {
 		Render(content)
 
 	// Center the modal on screen
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal)
+	return modal
 }

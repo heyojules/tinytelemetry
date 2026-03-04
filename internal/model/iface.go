@@ -20,6 +20,7 @@ type LogQuerier interface {
 	TopServicesBySeverity(severity string, limit int, opts QueryOpts) ([]DimensionCount, error)
 	ListApps() ([]string, error)
 	RecentLogsFiltered(limit int, app string, severityLevels []string, messagePattern string) ([]LogRecord, error)
+	SearchLogs(term string, limit int, opts QueryOpts) ([]LogRecord, error)
 }
 
 // SchemaQuerier provides schema introspection and arbitrary read-only queries.

@@ -154,6 +154,10 @@ func (m *DashboardModel) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.PushModal(NewSeverityFilterModal(m))
 		return m, nil
 
+	case key.Matches(msg, k.SearchModal):
+		m.PushModal(NewSearchModal(m))
+		return m, nil
+
 	case key.Matches(msg, k.DeckPause):
 		// Per-deck pause: toggle pause on focused deck's TypeID
 		if m.activeSection == SectionDecks && m.activeDeckIdx < len(m.decks) {
@@ -212,36 +216,41 @@ func (m *DashboardModel) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Deck left/right navigation
+	// Grid-aware deck navigation (2-column layout)
 	if m.activeSection == SectionDecks {
+		cols := m.deckColumnCount()
+		col := m.activeDeckIdx % cols
 		switch {
 		case key.Matches(msg, k.Right):
-			if m.activeDeckIdx < len(m.decks)-1 {
+			if col < cols-1 && m.activeDeckIdx+1 < len(m.decks) {
 				m.activeDeckIdx++
 			} else {
-				// Last deck → go to next page
-				m.nextPage()
-				m.activeSection = SectionDecks
+				cmd := m.nextView()
 				m.activeDeckIdx = 0
-				if m.activeDeckIdx >= len(m.decks) {
-					m.activeDeckIdx = max(0, len(m.decks)-1)
-				}
+				return m, cmd
 			}
 			return m, nil
 		case key.Matches(msg, k.Left):
-			if m.activeDeckIdx > 0 {
+			if col > 0 {
 				m.activeDeckIdx--
+			} else if m.sidebarVisible {
+				m.activeSection = SectionSidebar
 			} else {
-				pg := m.activePage()
-				if pg != nil && len(pg.Views) > 1 {
-					// Multiple views → go to prev view, focus last deck
-					cmd := m.prevView()
-					m.activeSection = SectionDecks
-					m.activeDeckIdx = max(0, len(m.decks)-1)
-					return m, cmd
-				} else if m.sidebarVisible {
-					m.activeSection = SectionSidebar
-				}
+				cmd := m.prevView()
+				m.activeDeckIdx = max(0, len(m.decks)-1)
+				return m, cmd
+			}
+			return m, nil
+		case key.Matches(msg, k.Down):
+			newIdx := m.activeDeckIdx + cols
+			if newIdx < len(m.decks) {
+				m.activeDeckIdx = newIdx
+			}
+			return m, nil
+		case key.Matches(msg, k.Up):
+			newIdx := m.activeDeckIdx - cols
+			if newIdx >= 0 {
+				m.activeDeckIdx = newIdx
 			}
 			return m, nil
 		}

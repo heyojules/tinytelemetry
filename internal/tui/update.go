@@ -53,6 +53,16 @@ func (m *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case searchDebounceMsg, searchResultsMsg:
+		if modal := m.TopModal(); modal != nil {
+			pop, cmd := modal.Update(msg)
+			if pop {
+				m.PopModal()
+			}
+			return m, cmd
+		}
+		return m, nil
+
 	case tea.MouseMsg:
 		return m.handleMouseEvent(msg)
 

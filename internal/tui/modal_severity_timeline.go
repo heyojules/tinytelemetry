@@ -52,7 +52,7 @@ func renderSeverityModalView(vp *viewport.Model, sm *SeverityModal, width, heigh
 		BorderForeground(ColorBlue).
 		Render(modal)
 
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, finalModal)
+	return finalModal
 }
 
 func renderTimeRangeTabs(labels []string, active int, width int) string {

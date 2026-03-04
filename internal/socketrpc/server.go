@@ -318,6 +318,17 @@ func (s *Server) dispatch(req Request) Response {
 		}
 		return marshalResult(s.store.RecentLogsFiltered(p.Limit, p.App, p.SeverityLevels, p.MessagePattern))
 
+	case "SearchLogs":
+		var p struct {
+			Term  string
+			Limit int
+			Opts  model.QueryOpts
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return invalidParams(err)
+		}
+		return marshalResult(s.store.SearchLogs(p.Term, p.Limit, p.Opts))
+
 	default:
 		resp.Error = &RPCError{Code: -32601, Message: fmt.Sprintf("method not found: %s", req.Method)}
 		return resp

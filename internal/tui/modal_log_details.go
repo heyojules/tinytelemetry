@@ -67,5 +67,5 @@ func (m *DashboardModel) renderSplitModalView(vp *viewport.Model, entry *model.L
 		BorderForeground(ColorBlue).
 		Render(modal)
 
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, finalModal)
+	return finalModal
 }

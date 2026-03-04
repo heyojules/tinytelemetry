@@ -173,3 +173,13 @@ func (c *Client) RecentLogsFiltered(limit int, app string, severityLevels []stri
 	}, &result)
 	return result, err
 }
+
+func (c *Client) SearchLogs(term string, limit int, opts model.QueryOpts) ([]model.LogRecord, error) {
+	var result []model.LogRecord
+	err := c.call("SearchLogs", map[string]interface{}{
+		"Term":  term,
+		"Limit": limit,
+		"Opts":  opts,
+	}, &result)
+	return result, err
+}

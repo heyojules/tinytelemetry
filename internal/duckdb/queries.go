@@ -644,6 +644,51 @@ func (s *Store) RecentLogsFiltered(limit int, app string, severityLevels []strin
 	return results, rows.Err()
 }
 
+// SearchLogs performs a case-insensitive substring search on log messages.
+func (s *Store) SearchLogs(term string, limit int, opts QueryOpts) ([]LogRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ctx, cancel := s.queryCtx()
+	defer cancel()
+
+	andApp, aArgs := appAnd(opts)
+	query := fmt.Sprintf(`SELECT timestamp, orig_timestamp, level, level_num, message, raw_line, service, hostname, pid, CAST(attributes AS VARCHAR) AS attributes, source, app
+		FROM logs
+		WHERE contains(lower(message), lower(?))%s
+		ORDER BY timestamp DESC
+		LIMIT ?`, andApp)
+
+	args := append([]interface{}{term}, aArgs...)
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []LogRecord
+	for rows.Next() {
+		var r LogRecord
+		var origTS sql.NullTime
+		var attrsJSON string
+		if err := rows.Scan(&r.Timestamp, &origTS, &r.Level, &r.LevelNum, &r.Message, &r.RawLine, &r.Service, &r.Hostname, &r.PID, &attrsJSON, &r.Source, &r.App); err != nil {
+			log.Printf("duckdb scan error (SearchLogs): %v", err)
+			continue
+		}
+		if origTS.Valid {
+			r.OrigTimestamp = origTS.Time
+		}
+		r.Attributes = make(map[string]string)
+		if attrsJSON != "" && attrsJSON != "{}" {
+			parseJSONMap(attrsJSON, r.Attributes)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 // parseJSONMap parses a JSON string into a map[string]string.
 func parseJSONMap(jsonStr string, dest map[string]string) error {
 	// Simple JSON map parser for {"key":"value",...} format

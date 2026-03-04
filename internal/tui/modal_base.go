@@ -51,7 +51,7 @@ func (m *DashboardModel) renderSingleModalView(vp *viewport.Model, content strin
 		BorderForeground(ColorBlue).
 		Render(modal)
 
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, finalModal)
+	return finalModal
 }
 
 // renderModalStatusBar renders the status bar for modals

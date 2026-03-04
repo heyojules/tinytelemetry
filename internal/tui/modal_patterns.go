@@ -69,7 +69,7 @@ func (m *DashboardModel) renderPatternsModalWithViewport(vp *viewport.Model, wid
 		BorderForeground(ColorBlue).
 		Render(modal)
 
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, finalModal)
+	return finalModal
 }
 
 // renderAllPatternsContent renders all patterns in the same chart style format

@@ -41,6 +41,7 @@ type KeyMap struct {
 	IntervalDown   key.Binding
 	Pause          key.Binding
 	DeckPause      key.Binding
+	SearchModal    key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -168,6 +169,10 @@ func DefaultKeyMap() KeyMap {
 		DeckPause: key.NewBinding(
 			key.WithKeys("p"),
 			key.WithHelp("p", "pause deck"),
+		),
+		SearchModal: key.NewBinding(
+			key.WithKeys("G"),
+			key.WithHelp("G", "search logs"),
 		),
 	}
 }

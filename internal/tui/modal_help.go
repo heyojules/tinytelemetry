@@ -55,7 +55,7 @@ func (m *DashboardModel) renderHelpModalWithViewport(vp *viewport.Model, width, 
 		BorderForeground(ColorBlue).
 		Render(modal)
 
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, finalModal)
+	return finalModal
 }
 
 // renderHelpModalContent returns the help modal content without positioning
@@ -74,6 +74,7 @@ ACTIONS:
   /              - Activate filter (regex supported)
   s              - Search and highlight text in logs
   [ / ]          - Switch view (deck sets)
+  G              - Search and jump to log entries
   Ctrl+f         - Open severity filter modal
   f              - Open fullscreen log viewer modal
   Space          - Pause/unpause UI updates (manual)

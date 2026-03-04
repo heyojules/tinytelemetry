@@ -60,7 +60,7 @@ func (m *DashboardModel) renderCountsModalWithViewport(vp *viewport.Model, cm *C
 		BorderForeground(ColorBlue).
 		Render(modal)
 
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, finalModal)
+	return finalModal
 }
 
 // renderCountsModalContent renders the content for the counts modal
