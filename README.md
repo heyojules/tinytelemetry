@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/26e6c9d4-1e0a-42c9-a7b2-cef549bf96db-1.png" alt="Lotus Logo" width="280" />
+  <img src="assets/26e6c9d4-1e0a-42c9-a7b2-cef549bf96db-1.png" alt="Tiny Telemetry Logo" width="280" />
 </p>
 
-<h1 align="center">Lotus</h1>
+<h1 align="center">Tiny Telemetry</h1>
 <p align="center"><strong>Tiny, standards-based telemetry tool, built from first principles</strong></p>
 
 <p align="center">
@@ -12,9 +12,9 @@
 > [!WARNING]
 > **Still in heavy development** — not ready for production use.
 
-## Why Lotus exists
+## Why Tiny Telemetry exists
 
-Lotus is a thin layer that ingests telemetry/analytics, stores them in DuckDB, and exposes a read-only HTTP API queryable by AI agents and scripts. A TUI dashboard (`lotus-tui`) is included for humans, organized into pages (Logs, Metrics, Analytics) with switchable views within each page.
+Tiny Telemetry is a thin layer that ingests telemetry/analytics, stores them in DuckDB, and exposes a read-only HTTP API queryable by AI agents and scripts. A TUI dashboard (`Tiny Telemetry-tui`) is included for humans, organized into pages (Logs, Metrics, Analytics) with switchable views within each page.
 
 
 **Design principles:**
@@ -37,29 +37,29 @@ Input Plugins          Processing              Storage              Read Surface
               ├──→  │  + parser   │──→     │  DuckDB   │──→     │  (agents, scripts)
   stdin     ──┘     │             │        │           │        └──────────────
      ↑              └─────────────┘        │           │        ┌─ Socket RPC
-     │                    ↓                │           │──→     │  (lotus-tui)
+     │                    ↓                │           │──→     │  (Tiny Telemetry-tui)
   SourceMux          InsertBuffer          │           │        └──────────────
                     (batch append)         └───────────┘
 ```
 
 ## Themes
 
-Lotus ships with 12 color themes:
+Tiny Telemetry ships with 12 color themes:
 
 ```yaml
 skin: dracula
 ```
 
-Available: `lotus-dark`, `lotus-light`, `dracula`, `github-light`, `gruvbox`, `matrix`, `monokai`, `nord`, `solarized-dark`, `solarized-light`, `spring`, `vs-code-light`.
+Available: `Tiny Telemetry-dark`, `Tiny Telemetry-light`, `dracula`, `github-light`, `gruvbox`, `matrix`, `monokai`, `nord`, `solarized-dark`, `solarized-light`, `spring`, `vs-code-light`.
 
 ## Screenshots
 
 <p align="center">
-  <img src="assets/Screenshot 2026-02-23 at 22.22.09.png" alt="Lotus running" width="500" />
+  <img src="assets/Screenshot 2026-02-23 at 22.22.09.png" alt="Tiny Telemetry running" width="500" />
 </p>
 
 <p align="center">
-  <img src="assets/Screenshot 2026-02-23 at 10.25.45.png" alt="Lotus TUI dashboard" width="700" />
+  <img src="assets/Screenshot 2026-02-23 at 10.25.45.png" alt="Tiny Telemetry TUI dashboard" width="700" />
 </p>
 
 ## License
